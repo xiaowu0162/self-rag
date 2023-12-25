@@ -56,12 +56,12 @@ def call_model_rerank_w_scores_batch(prompt, evidences, model, max_new_tokens=15
     if mode != "always_retrieve":
         sampling_params = SamplingParams(
             temperature=0.0, top_p=1.0, max_tokens=max_new_tokens, logprobs=32016)
-        preds = model.generate([prompt], sampling_params)
+        preds = model.generate([prompt], sampling_params, use_tqdm=False)
         pred_token_ids = preds[0].outputs[0].token_ids
         pred_text = preds[0].outputs[0].text
         pred_log_probs = preds[0].outputs[0].logprobs
         results["no_retrieval"] = pred_text
-
+        
     # save relevance token scores
     if mode == "always_retrieve":
         do_retrieve = True
@@ -77,17 +77,18 @@ def call_model_rerank_w_scores_batch(prompt, evidences, model, max_new_tokens=15
                     score_dict[tok] = -100
                 prob = pred_log_probs[0][id]
                 score_dict[tok] = float(prob)
-            do_retrieve = score_dict["[Retrieval]"] / (
-                score_dict["[Retrieval]"] + score_dict["[No Retrieval]"]) > threshold
+            do_retrieve = score_dict["[Retrieval]"] / (score_dict["[Retrieval]"] + score_dict["[No Retrieval]"]) > threshold
+            # print(score_dict["[Retrieval]"], score_dict["[No Retrieval]"], score_dict["[Retrieval]"] / (score_dict["[Retrieval]"] + score_dict["[No Retrieval]"]), do_retrieve)
         else:
-            do_retrieve = "[Retrieval]" in pred
+            do_retrieve = "[Retrieval]" in pred_text
+        # print(do_retrieve)
 
     if do_retrieve is True:
         evidence_augmented_inputs = [prompt + "[Retrieval]<paragraph>{0}\n{1}</paragraph>".format(
             para["title"], para["text"]) for para in evidences]
         sampling_params = SamplingParams(
             temperature=0.0, top_p=1.0, max_tokens=max_new_tokens, logprobs=5000)
-        preds = model.generate(evidence_augmented_inputs, sampling_params)
+        preds = model.generate(evidence_augmented_inputs, sampling_params, use_tqdm=False)
 
         relevance_score_dict = {}
         grd_score_dict = {}
@@ -170,7 +171,7 @@ def call_model_rerank_w_scores_batch(prompt, evidences, model, max_new_tokens=15
         sampling_params = SamplingParams(
             temperature=0.0, top_p=1.0, max_tokens=max_new_tokens)
         prompt += "[No Retrieval]"
-        preds = model.generate([prompt], sampling_params)
+        preds = model.generate([prompt], sampling_params, use_tqdm=False)
 
         pred = preds[0].outputs[0].text
 
@@ -308,11 +309,12 @@ def main():
     # Get token ids for reflection tokens.
     ret_tokens, rel_tokens, grd_tokens, ut_tokens = load_special_tokens(
         tokenizer, use_grounding=args.use_groundness, use_utility=args.use_utility)
-
+    
     def generate(prompt, evidences, max_new_tokens):
         return call_model_rerank_w_scores_batch(prompt, evidences=evidences, model=model, max_new_tokens=max_new_tokens,
                                                 rel_tokens=rel_tokens, ret_tokens=ret_tokens, grd_tokens=grd_tokens, ut_tokens=ut_tokens,
-                                                threshold=args.threshold, beam_width=args.beam_width, max_depth=args.max_depth, use_seqscore=args.use_seqscore,
+                                                # threshold=args.threshold, beam_width=args.beam_width, max_depth=args.max_depth, use_seqscore=args.use_seqscore,
+                                                threshold=args.threshold, use_seqscore=args.use_seqscore,
                                                 w_rel=args.w_rel, w_sup=args.w_sup, w_use=args.w_use, mode=args.mode, closed=args.task in ["fever", "arc_c"])
 
     preds = []
@@ -351,12 +353,12 @@ def main():
             raise NotImplementedError
 
         metric_results.append(metric_result)
-        if i % 10 == 0:
-            print("average: {}".format(np.mean(metric_results)))
-            final_results = {"preds": preds, "prompts": prompts, "metric_results": metric_results, "all_results": all_results,
-                             "golds": golds,  "metric":  args.metric, "metric_mean": np.mean(metric_results), "scores": scores}
-            with open(args.output_file + "_tmp", "w") as outfile:
-                json.dump(final_results, outfile)
+        # if i % 10 == 0:
+        #     print("average: {}".format(np.mean(metric_results)))
+        #     final_results = {"preds": preds, "prompts": prompts, "metric_results": metric_results, "all_results": all_results,
+        #                      "golds": golds,  "metric":  args.metric, "metric_mean": np.mean(metric_results), "scores": scores}
+        #     with open(args.output_file + "_tmp", "w") as outfile:
+        #         json.dump(final_results, outfile)
 
     final_results = {"preds": preds, "prompts": prompts, "metric_results": metric_results, "all_results": all_results,
                      "golds": golds,  "metric":  args.metric, "metric_mean": np.mean(metric_results), "scores": scores}
@@ -364,7 +366,7 @@ def main():
         json.dump(final_results, outfile)
 
     print("Final result: {0}".format(np.mean(metric_results)))
-    print("Retrieval Frequencies: {0}".format(count / len(final_results)))
+    print("Retrieval Frequencies: {0}".format(count / len(preds)))
 
 
 if __name__ == "__main__":

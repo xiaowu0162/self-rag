@@ -48,9 +48,11 @@ def call_model_instructgpt(prompt, model, max_tokens=50):
 
 
 def call_model(prompts, model, max_new_tokens=50):
+    # sampling_params = SamplingParams(
+    #     temperature=0.8, top_p=0.95, max_tokens=max_new_tokens)
     sampling_params = SamplingParams(
-        temperature=0.8, top_p=0.95, max_tokens=max_new_tokens)
-    preds = model.generate(prompts, sampling_params)
+        temperature=0, top_p=1, max_tokens=max_new_tokens)
+    preds = model.generate(prompts, sampling_params, use_tqdm=False)
     preds = [pred.outputs[0].text.split("\n\n")[0] for pred in preds]
     postprocessed_preds = [postprocess_output(pred) for pred in preds]
     return postprocessed_preds, preds
@@ -157,7 +159,7 @@ def main():
         batch = input_data[idx*args.batch_size:(idx+1)*args.batch_size]
         processed_batch = [
             PROMPT_DICT[args.prompt_name].format_map(item) for item in batch]
-
+        
         if isOpenAI is True:
             preds = []
             for input_instance in processed_batch:
@@ -177,6 +179,12 @@ def main():
                 pred, args.task, args.choices)
             item["output"] = pred
             final_results.append(item)
+            
+        # print(processed_batch)
+        # print(preds)
+        # print([x['golds'] for x in batch])
+        # print([match(x["output"], x["golds"]) for x in batch])
+        # exit()
 
     if len(input_data) % args.batch_size > 0:
         batch = input_data[(idx+1)*args.batch_size:]
@@ -214,6 +222,7 @@ def main():
             raise NotImplementedError
         item["metric_result"] = metric_result
 
+    print(args)
     print("overall result: {0}".format(
         np.mean([item["metric_result"] for item in input_data])))
 
