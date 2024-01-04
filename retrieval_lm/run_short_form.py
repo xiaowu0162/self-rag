@@ -51,7 +51,9 @@ def postprocess_answer_option_conditioned(answer):
 def call_model_rerank_w_scores_batch(prompt, evidences, model, max_new_tokens=15,
                                      ret_tokens=None, rel_tokens=None, grd_tokens=None, ut_tokens=None,
                                      use_seqscore=False, threshold=0.5, 
-                                     w_rel=1.0, w_sup=1.0, w_use=0.5, mode="adaptive_retrieval", closed=False):
+                                     w_rel=1.0, w_sup=1.0, w_use=0.5, mode="adaptive_retrieval", closed=False,
+                                     return_retrieval_prob=False):
+    retrieval_prob = None
     results = {}
     if mode != "always_retrieve":
         sampling_params = SamplingParams(
@@ -77,7 +79,8 @@ def call_model_rerank_w_scores_batch(prompt, evidences, model, max_new_tokens=15
                     score_dict[tok] = -100
                 prob = pred_log_probs[0][id]
                 score_dict[tok] = float(prob)
-            do_retrieve = score_dict["[Retrieval]"] / (score_dict["[Retrieval]"] + score_dict["[No Retrieval]"]) > threshold
+            retrieval_prob = score_dict["[Retrieval]"] / (score_dict["[Retrieval]"] + score_dict["[No Retrieval]"])
+            do_retrieve = retrieval_prob > threshold
             # print(score_dict["[Retrieval]"], score_dict["[No Retrieval]"], score_dict["[Retrieval]"] / (score_dict["[Retrieval]"] + score_dict["[No Retrieval]"]), do_retrieve)
         else:
             do_retrieve = "[Retrieval]" in pred_text
@@ -89,6 +92,10 @@ def call_model_rerank_w_scores_batch(prompt, evidences, model, max_new_tokens=15
         sampling_params = SamplingParams(
             temperature=0.0, top_p=1.0, max_tokens=max_new_tokens, logprobs=5000)
         preds = model.generate(evidence_augmented_inputs, sampling_params, use_tqdm=False)
+        
+        # print(evidence_augmented_inputs)
+        # print([x.outputs[0].text for x in preds])
+        # exit()
 
         relevance_score_dict = {}
         grd_score_dict = {}
@@ -178,7 +185,10 @@ def call_model_rerank_w_scores_batch(prompt, evidences, model, max_new_tokens=15
     # Aggregating answers
     if len(results) == 1:
         postprocessed_pred = postprocess_answer_option_conditioned(pred)
-        return postprocessed_pred, results, do_retrieve
+        if return_retrieval_prob:
+            return postprocessed_pred, results, do_retrieve, retrieval_prob
+        else:
+            return postprocessed_pred, results, do_retrieve
     else:
         answer2score = {}
         if closed is True:
@@ -198,7 +208,14 @@ def call_model_rerank_w_scores_batch(prompt, evidences, model, max_new_tokens=15
             best_path = sorted(path2score.items(),
                                key=lambda x: x[1], reverse=True)[0][0]
             best_option = results[best_path]["pred"]
-        return best_option, results, do_retrieve
+            
+        # print(path2score)
+        # print(best_option, results, do_retrieve, retrieval_prob)
+        # exit()
+        if return_retrieval_prob:
+            return best_option, results, do_retrieve, retrieval_prob
+        else:
+            return best_option, results, do_retrieve
 
 
 def process_data_evidences(demonstration, top_n):
@@ -288,6 +305,8 @@ def main():
     parser.add_argument('--mode', type=str, help="mode to control retrieval.",
                         default="default", choices=['adaptive_retrieval', 'no_retrieval', 'always_retrieve'],)
     parser.add_argument('--metric', type=str, help="metric to be used during evaluation")
+    parser.add_argument("--store_retrieval_prob", action="store_true")
+    
     args = parser.parse_args()
     gpt = args.model_name
     input_path = args.input_file
@@ -315,7 +334,8 @@ def main():
                                                 rel_tokens=rel_tokens, ret_tokens=ret_tokens, grd_tokens=grd_tokens, ut_tokens=ut_tokens,
                                                 # threshold=args.threshold, beam_width=args.beam_width, max_depth=args.max_depth, use_seqscore=args.use_seqscore,
                                                 threshold=args.threshold, use_seqscore=args.use_seqscore,
-                                                w_rel=args.w_rel, w_sup=args.w_sup, w_use=args.w_use, mode=args.mode, closed=args.task in ["fever", "arc_c"])
+                                                w_rel=args.w_rel, w_sup=args.w_sup, w_use=args.w_use, mode=args.mode, closed=args.task in ["fever", "arc_c"],
+                                                return_retrieval_prob=args.store_retrieval_prob)
 
     preds = []
     prompts = []
@@ -323,13 +343,19 @@ def main():
     metric_results = []
     scores = []
     all_results = []
+    retrieval_probs = []
     count = 0
     for i, row in tqdm(enumerate(input_data)):
         results = {}
         prompt = PROMPT_DICT["prompt_no_input"].format_map(row)
         _, evidences = process_data_evidences(row, top_n=args.ndocs)
-        pred, results, do_retrieve = generate(
-            prompt, evidences, max_new_tokens=args.max_new_tokens,)
+        if args.store_retrieval_prob:
+            pred, results, do_retrieve, retrieval_prob = generate(
+                prompt, evidences, max_new_tokens=args.max_new_tokens,)
+            retrieval_probs.append(retrieval_prob)
+        else:
+            pred, results, do_retrieve = generate(
+                prompt, evidences, max_new_tokens=args.max_new_tokens,)
         if type(pred) is str and pred[0] == "#" or pred[0] == ":":
             pred = pred[1:]
         prompts.append(prompt)
@@ -351,7 +377,7 @@ def main():
             metric_result = match(pred, row["answers"])
         else:
             raise NotImplementedError
-
+        
         metric_results.append(metric_result)
         # if i % 10 == 0:
         #     print("average: {}".format(np.mean(metric_results)))
@@ -364,6 +390,9 @@ def main():
                      "golds": golds,  "metric":  args.metric, "metric_mean": np.mean(metric_results), "scores": scores}
     with open(args.output_file, "w") as outfile:
         json.dump(final_results, outfile)
+    if args.store_retrieval_prob:
+        with open(args.output_file + '.retrievalprobs.json', "w") as outfile:
+            json.dump(retrieval_probs, outfile)
 
     print("Final result: {0}".format(np.mean(metric_results)))
     print("Retrieval Frequencies: {0}".format(count / len(preds)))

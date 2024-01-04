@@ -95,6 +95,11 @@ def main():
                         default=".cache")
     parser.add_argument('--api_key', type=str, default=None)
     args = parser.parse_args()
+    
+    # hack
+    if args.instruction == "":
+        args.instruction = None
+    
     isOpenAI = True if args.model_name in ["text-davinci-003", "gpt-3.5-turbo-0301", "gpt-3.5-turbo"] else False
     if isOpenAI is False:
         if args.dtype is not None:

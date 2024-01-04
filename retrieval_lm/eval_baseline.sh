@@ -17,10 +17,30 @@ MODEL_ZOO["alpaca-7b"]="/local2/diwu/selfrag_model_cache/Llama-2-7b-alpaca-clean
 model_name=${MODEL_ZOO["$model"]}
 
 
-# task 
+# task-specific params
+gen_length=100
 if [[ $task == "popqa" ]]; then
     use_task='qa'
+    ndocs=10
     prompt_file="${data_root}/popqa_longtail_w_gs.jsonl"
+    instruction=""
+elif [[ $task == "triviaqa" ]]; then
+    use_task='qa'
+    ndocs=10
+    prompt_file="${data_root}/triviaqa_test.jsonl"
+    instruction=""
+elif [[ $task == "fever" ]]; then
+    use_task='fever'
+    ndocs=5
+    gen_length=50
+    prompt_file="${data_root}/health_claims_processed.jsonl"
+    instruction="Is the following statement correct or not? Say true if it is correct; otherwise say false."
+elif [[ $task == "arc_c" ]]; then
+    use_task='arc_c'
+    ndocs=5
+    gen_length=50
+    prompt_file="${data_root}/arc_challenge_processed.jsonl"
+    instruction="Given four answer candidates, A, B, C and D, choose the best answer choice."
 else
     echo "Unsupported task: ${task}"
 fi
@@ -40,15 +60,15 @@ fi
 output_dir=$output_root/$task/$exp/
 mkdir -p $output_dir
 
-gen_length=100
-
 python run_baseline_lm.py \
        --mode ${mode} \
+       --top_n ${ndocs} \
        --model_name ${model_name} \
        --input_file ${prompt_file} \
+       --instruction "${instruction}" \
        --max_new_tokens ${gen_length} \
        --metric match \
        --result_fp ${output_dir}/${model}.json \
        --task ${use_task} \
-       --prompt_name "prompt_no_input"
+       --prompt_name ${prompt_name}
 
