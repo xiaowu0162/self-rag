@@ -27,6 +27,7 @@ import os
 # from ..retrieval_lm.llama_flash_attn_monkey_patch import replace_llama_attn_with_flash_attn
 from retrieval_lm.llama_flash_attn_monkey_patch import replace_llama_attn_with_flash_attn
 
+
 IGNORE_INDEX = -100
 DEFAULT_PAD_TOKEN = "[PAD]"
 DEFAULT_EOS_TOKEN = "</s>"
@@ -36,9 +37,20 @@ PROMPT_DICT = {
     "prompt_input": (
         "### Instruction:\n{instruction}\n\n### Input:\n{input}\n\n### Response:"
     ),
-    "prompt_no_input": (
-        "### Instruction:\n{instruction}\n\n### Response:"
+    # "prompt_no_input": (
+    #     "### Instruction:\n{instruction}\n\n### Response:"
+    # ),
+    "prompt_input_reflection_trigger": (
+        "{input}{reflection_trigger}"
     ),
+}
+
+TASK2TRIGGER = {
+    'relevance': "[Reflect IsRel]", 
+    'groudness': "[Reflect IsSup]", 
+    'multi_retrieval': "[Reflect Retrieval]", 
+    'retrieval': "[Reflect Retrieval]", 
+    'utility': "[Reflect IsUse]"
 }
 
 
@@ -74,6 +86,7 @@ class ModelArguments:
 @dataclass
 class DataArguments:
     data_path: str = field(default=None, metadata={"help": "Path to the training data."})
+    add_reflection_trigger: bool = field(default=False, metadata={"help": "Add a trigger preceding the reflection tokens."})
     separated: bool = field(
         default=False,
         metadata={
@@ -223,27 +236,42 @@ def preprocess(
                             end_idx = start_idx + k
                     labels[i][start_idx+1:end_idx] = IGNORE_INDEX
                     context_start = False
+    # print("Source No. 0:", [sources[1]])
+    # print("Example No. 0:", [examples[1]])
+    # print(input_ids[1])
+    # print(labels[1])
+    # exit()
     return dict(input_ids=input_ids, labels=labels)
 
 class SupervisedDataset(Dataset):
     """Dataset for supervised fine-tuning."""
 
-    def __init__(self, data_path: str, tokenizer: transformers.PreTrainedTokenizer, skip_tokens=None, context_markups=None, separated=False):
+    def __init__(self, data_path: str, tokenizer: transformers.PreTrainedTokenizer, skip_tokens=None, 
+                 context_markups=None, separated=False, add_reflection_trigger=False):
         super(SupervisedDataset, self).__init__()
         logging.warning("Loading data...")
         list_data_dict = jload(data_path)
 
         logging.warning("Formatting inputs...")
+        '''
         # prompt_input, prompt_no_input, prompt_no_input_paragraph, prompt_no_input_separated = PROMPT_DICT["prompt_input"], PROMPT_DICT["prompt_no_input"], PROMPT_DICT["prompt_no_input_paragraph"], PROMPT_DICT["prompt_no_input_separated"]
         prompt_input, prompt_no_input = PROMPT_DICT["prompt_input"], PROMPT_DICT["prompt_no_input"]
         sources = [
             prompt_input.format_map(example) if example.get("input", "") != "" else prompt_no_input.format_map(example)
             for example in list_data_dict
         ]
+        '''
+        if add_reflection_trigger:
+            for i_example in range(len(list_data_dict)):
+                list_data_dict[i_example]['reflection_trigger'] = TASK2TRIGGER[list_data_dict[i_example]['task']]
+            sources = [PROMPT_DICT["prompt_input_reflection_trigger"].format_map(example) for example in list_data_dict]
+        else:
+            sources = [PROMPT_DICT["prompt_input"].format_map(example) for example in list_data_dict]
+        
         targets = [f"{example['output']}{tokenizer.eos_token}" for example in list_data_dict]
 
         logging.warning("Tokenizing inputs... This may take some time...")
-
+     
         data_dict = preprocess(sources, targets, tokenizer, skip_tokens, context_markups=context_markups)
 
         self.input_ids = data_dict["input_ids"]
@@ -277,7 +305,9 @@ class DataCollatorForSupervisedDataset(object):
 
 def make_supervised_data_module(tokenizer: transformers.PreTrainedTokenizer, data_args, skip_tokens=None, context_markups=None) -> Dict:
     """Make dataset and collator for supervised fine-tuning."""
-    train_dataset = SupervisedDataset(tokenizer=tokenizer, data_path=data_args.data_path, skip_tokens=skip_tokens, context_markups=context_markups, separated=data_args.separated)
+    train_dataset = SupervisedDataset(tokenizer=tokenizer, data_path=data_args.data_path,
+                                      skip_tokens=skip_tokens, context_markups=context_markups, separated=data_args.separated,
+                                      add_reflection_trigger=data_args.add_reflection_trigger)
     data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer)
     return dict(train_dataset=train_dataset, eval_dataset=None, data_collator=data_collator)
 
@@ -311,7 +341,7 @@ def train():
 
     # add special tokens
     if model_args.use_special_token is True:
-        special_token_dict = {"additional_special_tokens": ["[No Retrieval]", "[Retrieval]", "[Continue to Use Evidence]", "[Irrelevant]", "[Relevant]", "<paragraph>", "</paragraph>", "[Utility:1]", "[Utility:2]", "[Utility:3]", "[Utility:4]", "[Utility:5]", "[Fully supported]", "[Partially supported]", "[No support / Contradictory]"]}
+        special_token_dict = {"additional_special_tokens": ["[No Retrieval]", "[Retrieval]", "[Continue to Use Evidence]", "[Irrelevant]", "[Relevant]", "<paragraph>", "</paragraph>", "[Utility:1]", "[Utility:2]", "[Utility:3]", "[Utility:4]", "[Utility:5]", "[Fully supported]", "[Partially supported]", "[No support / Contradictory]", "[Reflect Retrieval]", "[Reflect IsRel]", "[Reflect IsUse]", "[Reflect IsSup]"]}
         if tokenizer.pad_token is None:
             special_token_dict["pad_token"] = DEFAULT_PAD_TOKEN
         smart_tokenizer_and_embedding_resize(
@@ -327,6 +357,9 @@ def train():
                 tokenizer=tokenizer,
                 model=model,
             )
+
+    # print(tokenizer.encode('[Retrieval][No Retrieval]'))
+    tokenizer.save_pretrained(training_args.output_dir)
 
     if model_args.use_special_token is True:
         special_tokens = tokenizer.additional_special_tokens
