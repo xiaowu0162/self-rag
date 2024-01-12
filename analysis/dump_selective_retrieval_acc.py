@@ -13,7 +13,7 @@ PROMPT_DICT = {
     #     "### Instruction:\n{instruction}\n\n### Response:"
     # ),
     "prompt_input_reflection_trigger": (
-        "{input}{reflection_trigger}"
+        "{input}[Reflect Retrieval]"
     ),
 }
 
@@ -23,8 +23,11 @@ critic_data = json.load(open(data_dir + '/critic_training_data_gpt4_reward_all_0
 critic_tasks = set([x['task'] for x in critic_data])
 critic_task2data = {t: [x for x in critic_data if x['task'] == t] for t in critic_tasks} 
 
-model = '/local2/diwu/selfrag_model_cache/20240105_selfrag_critic_alldata/checkpoint-1000/'   # selfrag/selfrag_llama2_7b selfrag/self_rag_critic
-model_short = 'selfrag-critic-0105ckpt-alldata'   # selfrag-7b selfrag-critic
+# model = '/local2/diwu/selfrag_model_cache/20240105_selfrag_critic_alldata/checkpoint-1000/'   # selfrag/selfrag_llama2_7b selfrag/self_rag_critic
+model = '/local2/diwu/selfrag_model_cache/20240111_selfrag_critic_4kretrievaldata_reflectiontriggertrue'
+model_short = 'selfrag-critic-0105ckpt-4kretrievaldata_reflectiontriggertrue'   # selfrag-7b selfrag-critic
+use_trigger_template = True
+
 out_file = f'critic_data_selective_probs_{model_short}.txt'
 out_file_greedy = f'critic_data_greedy_{model_short}.txt'
 
@@ -44,7 +47,10 @@ ret_tokens = {token: tokenizer.convert_tokens_to_ids(token) for token in retriev
 with open(out_file, 'w') as out_f, open(out_file_greedy, 'w') as out_f_greedy:
     for entry in tqdm(critic_task2data['retrieval']):
         if use_critic_instructions:
-            preds = model.generate([PROMPT_DICT['prompt_input'].format_map(entry)], sampling_params, use_tqdm=False)
+            if use_trigger_template:
+                preds = model.generate([PROMPT_DICT['prompt_input_reflection_trigger'].format_map(entry)], sampling_params, use_tqdm=False)
+            else:
+                preds = model.generate([PROMPT_DICT['prompt_input'].format_map(entry)], sampling_params, use_tqdm=False)
         else:
             preds = model.generate([entry['input']], sampling_params, use_tqdm=False)
         # print(entry)

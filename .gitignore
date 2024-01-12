@@ -1,5 +1,7 @@
 */eval_data/
 results/
+retrieval_lm/temp_dir*/
+data/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
