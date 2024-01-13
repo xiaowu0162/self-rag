@@ -62,14 +62,18 @@ with open(out_file, 'w') as out_f, open(out_file_greedy, 'w') as out_f_greedy:
                 score_dict[tok] = -100
             prob = pred_log_probs[0][id]
             score_dict[tok] = float(prob)
+        ret_token_prob = score_dict["[Retrieval]"]
+        no_ret_token_prob = score_dict["[No Retrieval]"]
         retrieval_prob = score_dict["[Retrieval]"] / (score_dict["[Retrieval]"] + score_dict["[No Retrieval]"])
+        out_entry = {'ret_token_log_prob': ret_token_prob, 'no_ret_token_log_prob': no_ret_token_prob, 'retrieval_prob': retrieval_prob}
         
         if score_dict["[Retrieval]"] > score_dict["[No Retrieval]"]:
             greedy_label = '[Retrieval]'
         else:
             greedy_label = '[No Retrieval]'
 
-        print(retrieval_prob, file=out_f, flush=True)
+        # print(retrieval_prob, file=out_f, flush=True)
+        print(json.dumps(out_entry), file=out_f, flush=True)
         print(greedy_label, file=out_f_greedy, flush=True)
         print(score_dict["[Retrieval]"], score_dict["[No Retrieval]"], retrieval_prob, greedy_label)
     

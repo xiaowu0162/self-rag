@@ -7,10 +7,14 @@ import subprocess
 import numpy as np
 
 
-def average_fact_score(entries):
-    n_facts = sum([x['n_facts'] for x in entries])
-    scoresum = sum([x['factscore'] * x['n_facts'] for x in entries if x['factscore'] != 'n/a'])
-    return scoresum / n_facts
+def average_fact_score(entries, doc_level=False):
+    if not doc_level:
+        n = sum([x['n_facts'] for x in entries])
+        scoresum = sum([x['factscore'] * x['n_facts'] for x in entries if x['factscore'] != 'n/a'])
+    else:
+        n = len([x['factscore'] for x in entries if x['factscore'] != 'n/a'])
+        scoresum = sum([x['factscore'] for x in entries if x['factscore'] != 'n/a'])
+    return scoresum / n
 
 
 in_file = sys.argv[1]
@@ -43,6 +47,7 @@ with open(out_file, 'w') as out_f:
         cur_scoring_entry = {'n_facts': cur_nfacts, 'factscore': cur_score}
         all_scores.append(cur_scoring_entry)
         print('FactScore =', cur_score, 'n_facts =', cur_nfacts,
-            'Moving avg (doc) = {:.02f}'.format(np.mean([x['factscore'] for x in all_scores if x != 'n/a']).item()), 
-            'Moving avg (fact) = {:.02f}'.format(average_fact_score(all_scores)))
+              # 'Moving avg (doc) = {:.02f}'.format(np.mean([x['factscore'] for x in all_scores if x != 'n/a']).item()),
+              'Moving avg (doc) = {:.02f}'.format(average_fact_score(all_scores, doc_level=True)),
+              'Moving avg (fact) = {:.02f}'.format(average_fact_score(all_scores)))
         print(json.dumps(cur_scoring_entry), file=out_f)

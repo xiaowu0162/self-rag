@@ -78,7 +78,7 @@ def call_model_rerank_w_scores_batch(prompt, evidences, model, max_new_tokens=15
                 if id not in pred_log_probs[0]:
                     score_dict[tok] = -100
                 prob = pred_log_probs[0][id]
-                score_dict[tok] = float(prob)
+                score_dict[tok] = np.exp(prob).item() # float(prob)
             retrieval_prob = score_dict["[Retrieval]"] / (score_dict["[Retrieval]"] + score_dict["[No Retrieval]"])
             do_retrieve = retrieval_prob > threshold
             # print(score_dict["[Retrieval]"], score_dict["[No Retrieval]"], score_dict["[Retrieval]"] / (score_dict["[Retrieval]"] + score_dict["[No Retrieval]"]), do_retrieve)

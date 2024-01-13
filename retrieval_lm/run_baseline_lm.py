@@ -132,7 +132,10 @@ def main():
                 item["paragraph"] = "\n".join(evidences)
         else:
             for id, item in enumerate(input_data):
-                retrieval_result = item["ctxs"][:args.top_n]
+                if args.task == 'asqa':
+                    retrieval_result = item["docs"][:args.top_n]
+                else:
+                    retrieval_result = item["ctxs"][:args.top_n]
                 evidences = ["[{}] ".format(
                     i+1) + ctx["title"]+"\n" + ctx["text"] for i, ctx in enumerate(retrieval_result)]
                 item["paragraph"] = "\n".join(evidences)
@@ -216,16 +219,19 @@ def main():
             final_results.append(item)
 
     for item in input_data:
-        if args.metric == "em":
-            metric_result = metric_max_over_ground_truths(
-                exact_match_score, item["output"], item["golds"])
-        elif args.metric == "accuracy":
-            metric_result = 1.0 if item["golds"][0] in item["output"] else 0.0
-        elif args.metric == "match":
-            metric_result = match(item["output"], item["golds"])
+        if args.task == 'asqa':
+            item['metric_result'] = -1
         else:
-            raise NotImplementedError
-        item["metric_result"] = metric_result
+            if args.metric == "em":
+                metric_result = metric_max_over_ground_truths(
+                    exact_match_score, item["output"], item["golds"])
+            elif args.metric == "accuracy":
+                metric_result = 1.0 if item["golds"][0] in item["output"] else 0.0
+            elif args.metric == "match":
+                metric_result = match(item["output"], item["golds"])
+            else:
+                raise NotImplementedError
+            item["metric_result"] = metric_result
 
     print(args)
     print("overall result: {0}".format(

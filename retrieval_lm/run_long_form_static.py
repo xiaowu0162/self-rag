@@ -165,7 +165,13 @@ def call_model_beam_batch(prompt, model, max_new_tokens=15, ctxs=None, query=Non
         preds = model.generate([prompt], sampling_params, use_tqdm=False)
         preds = [pred.outputs[0].text.split("\n\n")[0] for pred in preds]
         prediction_tree = {}
-        return preds[0], prediction_tree
+        results = {
+            "prediction_tree": prediction_tree,
+            "depth": None,
+            "first_round_retrieve_prob": -1,
+            "retrieval_triggered_at_start": False
+        }
+        return preds[0], results
 
     do_retrieve = False
     if mode == "always_retrieve":

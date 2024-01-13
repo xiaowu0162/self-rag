@@ -41,6 +41,12 @@ elif [[ $task == "arc_c" ]]; then
     gen_length=50
     prompt_file="${data_root}/arc_challenge_processed.jsonl"
     instruction="Given four answer candidates, A, B, C and D, choose the best answer choice."
+elif [[ $task == "asqa" ]]; then
+    use_task='asqa'
+    ndocs=5
+    gen_length=300
+    prompt_file="${data_root}/asqa_eval_gtr_top100.json"
+    instruction="Answer the following question. The question may be ambiguous and have multiple correct answers, and in that case, you have to provide a long-form answer including all correct answers."
 else
     echo "Unsupported task: ${task}"
 fi
