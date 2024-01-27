@@ -1,0 +1,93 @@
+import os
+import json
+from tqdm import tqdm
+from transformers import AutoTokenizer, AutoModelForCausalLM
+from vllm import LLM, SamplingParams
+
+
+PROMPT_DICT = {
+    "prompt_input": (
+        "### Instruction:\n{instruction}\n\n### Input:\n{input}\n\n### Response:"
+    ),
+    # "prompt_no_input": (
+    #     "### Instruction:\n{instruction}\n\n### Response:"
+    # ),
+    "prompt_input_reflection_trigger": (
+        "{input}[Reflect Retrieval]"
+    ),
+}
+
+
+data_dir = '/home/diwu/ralm/self-rag/retrieval_lm/eval_data/'
+ds_file = '/home/diwu/ralm/self-rag/retrieval_lm/eval_data/popqa_longtail_w_gs.jsonl'
+ds_short = 'popqa'
+
+data = [json.loads(line) for line in open(ds_file).readlines()]
+
+#critic_data = json.load(open(data_dir + '/critic_training_data_gpt4_reward_all_0813_train.json'))
+#critic_tasks = set([x['task'] for x in critic_data])
+#critic_task2data = {t: [x for x in critic_data if x['task'] == t] for t in critic_tasks} 
+
+# model = '/local2/diwu/selfrag_model_cache/20240105_selfrag_critic_alldata/checkpoint-1000/'   # selfrag/selfrag_llama2_7b selfrag/self_rag_critic
+model = '/local2/diwu/selfrag_model_cache/20240111_selfrag_critic_4kretrievaldata_reflectiontriggertrue'
+model_short = 'selfrag-critic-0105ckpt-4kretrievaldata_reflectiontriggertrue'   # selfrag-7b selfrag-critic
+use_trigger_template = True
+
+use_critic_instructions = True
+if model == 'selfrag/selfrag_llama2_7b':
+    assert not use_critic_instructions
+elif model == 'selfrag/self_rag_critic':
+    assert use_critic_instructions
+
+tokenizer = AutoTokenizer.from_pretrained(model)
+model = LLM(model=model, download_dir='/home/diwu/ralm/self-rag/retrieval_lm/.cache', dtype='half', tensor_parallel_size=1)
+sampling_params = SamplingParams(temperature=0.0, top_p=1.0, max_tokens=2, logprobs=len(tokenizer))
+
+retrieval_tokens_names = ["[No Retrieval]", "[Retrieval]", "[Continue to Use Evidence]"]
+ret_tokens = {token: tokenizer.convert_tokens_to_ids(token) for token in retrieval_tokens_names}
+
+#with open(out_file, 'w') as out_f, open(out_file_greedy, 'w') as out_f_greedy:
+retrieval_probs = []
+for entry in tqdm(data):
+    format_entry = {
+        'input': 'Task instruction: ' + entry['question'],
+        'instruction': "When provided with instruction, please evaluate whether seeking additional information from external sources such as the web (e.g., Wikipedia) aids in producing a more comprehensive response. Respond with either [Retrieval] or [No Retrieval]."
+    }
+    if use_critic_instructions:
+        if use_trigger_template:
+            preds = model.generate([PROMPT_DICT['prompt_input_reflection_trigger'].format_map(format_entry)], sampling_params, use_tqdm=False)
+        else:
+            preds = model.generate([PROMPT_DICT['prompt_input'].format_map(format_entry)], sampling_params, use_tqdm=False)
+    else:
+        raise NotImplementedError # preds = model.generate([format_entry['input']], sampling_params, use_tqdm=False)
+        
+    pred_token_ids = preds[0].outputs[0].token_ids
+    pred_log_probs = preds[0].outputs[0].logprobs
+    score_dict = {}
+    for tok, id in ret_tokens.items():
+        if id not in pred_log_probs[0]:
+            score_dict[tok] = -100
+        prob = pred_log_probs[0][id]
+        score_dict[tok] = float(prob)
+    ret_token_prob = score_dict["[Retrieval]"]
+    no_ret_token_prob = score_dict["[No Retrieval]"]
+    retrieval_prob = score_dict["[Retrieval]"] / (score_dict["[Retrieval]"] + score_dict["[No Retrieval]"])
+    retrieval_probs.append(retrieval_prob)
+    '''
+    out_entry = {'ret_token_log_prob': ret_token_prob, 'no_ret_token_log_prob': no_ret_token_prob, 'retrieval_prob': retrieval_prob}
+    
+    if score_dict["[Retrieval]"] > score_dict["[No Retrieval]"]:
+        greedy_label = '[Retrieval]'
+    else:
+        greedy_label = '[No Retrieval]'
+
+    # print(retrieval_prob, file=out_f, flush=True)
+    print(json.dumps(out_entry), file=out_f, flush=True)
+    print(greedy_label, file=out_f_greedy, flush=True)
+    print(score_dict["[Retrieval]"], score_dict["[No Retrieval]"], retrieval_prob, greedy_label)
+    '''
+
+
+out_file = f'critic_data_selective_probs_{ds_short}_{model_short}.txt'
+with open(out_file, 'w') as f:
+    print(json.dumps(retrieval_probs), file=f)
